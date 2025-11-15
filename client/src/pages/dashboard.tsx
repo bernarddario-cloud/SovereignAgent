@@ -12,11 +12,16 @@ import { ConsentManager } from '@/components/consent-manager';
 import { FinancialOpportunities } from '@/components/financial-opportunities';
 import { ActionEngine } from '@/components/action-engine';
 import { SessionState } from '@/components/session-state';
+import { LedgerViewer } from '@/components/ledger-viewer';
+import { ConnectedAccounts } from '@/components/connected-accounts';
+import { ConsentConfirmSheet } from '@/components/consent-confirm-sheet';
 
 import type { Session } from '@shared/schema';
 
 export default function Dashboard() {
   const [isVoiceActive, setIsVoiceActive] = useState(false);
+  const [consentRequest, setConsentRequest] = useState<any>(null);
+  const [isConsentSheetOpen, setIsConsentSheetOpen] = useState(false);
   const { toast } = useToast();
   const queryClient = useQueryClient();
 
@@ -60,6 +65,14 @@ export default function Dashboard() {
             description: "Your voice command has been processed successfully.",
           });
           break;
+        case 'consent_required':
+          setConsentRequest(lastMessage.data);
+          setIsConsentSheetOpen(true);
+          toast({
+            title: "Consent Required",
+            description: "Review the requested action",
+          });
+          break;
         case 'consent_updated':
           queryClient.invalidateQueries({ queryKey: ['api', 'sessions', session?.id, 'consent'] });
           queryClient.invalidateQueries({ queryKey: ['api', 'sessions', session?.id] });
@@ -72,6 +85,7 @@ export default function Dashboard() {
           break;
         case 'action_executed':
           queryClient.invalidateQueries({ queryKey: ['api', 'sessions', session?.id, 'actions'] });
+          queryClient.invalidateQueries({ queryKey: ['api', 'ledger'] });
           break;
         case 'session_ended':
           toast({
@@ -178,6 +192,18 @@ export default function Dashboard() {
             )}
           </div>
 
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            {/* Connected Accounts */}
+            {session && (
+              <ConnectedAccounts userId={session.userId} />
+            )}
+
+            {/* Ledger Viewer */}
+            {session && (
+              <LedgerViewer userId={session.userId} />
+            )}
+          </div>
+
           {/* Action Execution Engine */}
           {session && (
             <ActionEngine sessionId={session.id} />
@@ -190,6 +216,13 @@ export default function Dashboard() {
           />
         </div>
       </div>
+
+      {/* Consent Confirmation Sheet */}
+      <ConsentConfirmSheet
+        consentRequest={consentRequest}
+        isOpen={isConsentSheetOpen}
+        onClose={() => setIsConsentSheetOpen(false)}
+      />
     </div>
   );
 }
