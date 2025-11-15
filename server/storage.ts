@@ -8,7 +8,11 @@ import {
   type Opportunity,
   type InsertOpportunity,
   type Action,
-  type InsertAction
+  type InsertAction,
+  type Token,
+  type InsertToken,
+  type LedgerEntry,
+  type InsertLedgerEntry
 } from "@shared/schema";
 import { randomUUID } from "crypto";
 
@@ -29,6 +33,7 @@ export interface IStorage {
   createConsentRequest(request: InsertConsentRequest): Promise<ConsentRequest>;
   updateConsentRequest(id: string, updates: Partial<ConsentRequest>): Promise<ConsentRequest | undefined>;
   getConsentRequestsBySessionId(sessionId: string): Promise<ConsentRequest[]>;
+  getPendingConsentRequests(sessionId: string): Promise<ConsentRequest[]>;
 
   // Opportunities
   getOpportunity(id: string): Promise<Opportunity | undefined>;
@@ -41,6 +46,19 @@ export interface IStorage {
   createAction(action: InsertAction): Promise<Action>;
   updateAction(id: string, updates: Partial<Action>): Promise<Action | undefined>;
   getActionsBySessionId(sessionId: string): Promise<Action[]>;
+
+  // Tokens
+  getToken(id: string): Promise<Token | undefined>;
+  getTokenByUserAndProvider(userId: string, provider: string): Promise<Token | undefined>;
+  getTokensByUserId(userId: string): Promise<Token[]>;
+  createToken(token: InsertToken): Promise<Token>;
+  updateToken(id: string, updates: Partial<Token>): Promise<Token>;
+  deleteToken(id: string): Promise<boolean>;
+
+  // Ledger Entries
+  getLedgerEntry(id: string): Promise<LedgerEntry | undefined>;
+  createLedgerEntry(entry: InsertLedgerEntry): Promise<LedgerEntry>;
+  getLedgerEntriesByUserId(userId: string, limit?: number): Promise<LedgerEntry[]>;
 }
 
 export class MemStorage implements IStorage {
@@ -49,6 +67,8 @@ export class MemStorage implements IStorage {
   private consentRequests: Map<string, ConsentRequest>;
   private opportunities: Map<string, Opportunity>;
   private actions: Map<string, Action>;
+  private tokens: Map<string, Token>;
+  private ledgerEntries: Map<string, LedgerEntry>;
 
   constructor() {
     this.users = new Map();
@@ -56,6 +76,8 @@ export class MemStorage implements IStorage {
     this.consentRequests = new Map();
     this.opportunities = new Map();
     this.actions = new Map();
+    this.tokens = new Map();
+    this.ledgerEntries = new Map();
 
     // Initialize with default user and opportunities
     this.initializeDefaultData();
@@ -247,6 +269,87 @@ export class MemStorage implements IStorage {
     return Array.from(this.actions.values()).filter(
       (action) => action.sessionId === sessionId,
     );
+  }
+
+  async getPendingConsentRequests(sessionId: string): Promise<ConsentRequest[]> {
+    return Array.from(this.consentRequests.values()).filter(
+      (request) => request.sessionId === sessionId && request.status === 'pending',
+    );
+  }
+
+  // Tokens
+  async getToken(id: string): Promise<Token | undefined> {
+    return this.tokens.get(id);
+  }
+
+  async getTokenByUserAndProvider(userId: string, provider: string): Promise<Token | undefined> {
+    return Array.from(this.tokens.values()).find(
+      (token) => token.userId === userId && token.provider === provider,
+    );
+  }
+
+  async getTokensByUserId(userId: string): Promise<Token[]> {
+    return Array.from(this.tokens.values()).filter(
+      (token) => token.userId === userId,
+    );
+  }
+
+  async createToken(insertToken: InsertToken): Promise<Token> {
+    const id = randomUUID();
+    const now = new Date();
+    const token: Token = {
+      ...insertToken,
+      id,
+      createdAt: now,
+      updatedAt: now,
+    };
+    this.tokens.set(id, token);
+    return token;
+  }
+
+  async updateToken(id: string, updates: Partial<Token>): Promise<Token> {
+    const token = this.tokens.get(id);
+    if (!token) throw new Error('Token not found');
+    
+    const updatedToken = { 
+      ...token, 
+      ...updates, 
+      updatedAt: new Date() 
+    };
+    this.tokens.set(id, updatedToken);
+    return updatedToken;
+  }
+
+  async deleteToken(id: string): Promise<boolean> {
+    return this.tokens.delete(id);
+  }
+
+  // Ledger Entries
+  async getLedgerEntry(id: string): Promise<LedgerEntry | undefined> {
+    return this.ledgerEntries.get(id);
+  }
+
+  async createLedgerEntry(insertEntry: InsertLedgerEntry): Promise<LedgerEntry> {
+    const id = randomUUID();
+    const entry: LedgerEntry = {
+      ...insertEntry,
+      id,
+      timestamp: new Date(),
+    };
+    this.ledgerEntries.set(id, entry);
+    return entry;
+  }
+
+  async getLedgerEntriesByUserId(userId: string, limit: number = 50): Promise<LedgerEntry[]> {
+    const entries = Array.from(this.ledgerEntries.values())
+      .filter((entry) => entry.userId === userId)
+      .sort((a, b) => {
+        const timeA = a.timestamp?.getTime() || 0;
+        const timeB = b.timestamp?.getTime() || 0;
+        return timeB - timeA;
+      });
+    
+    return entries.slice(0, limit);
   }
 }
 
