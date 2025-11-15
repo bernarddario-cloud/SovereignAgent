@@ -3,7 +3,7 @@ import type { InsertLedgerEntry, LedgerEntry } from '@shared/schema';
 import crypto from 'crypto';
 
 class Ledger {
-  private createHash(entry: Omit<InsertLedgerEntry, 'hash'>): string {
+  private createHash(entry: Omit<InsertLedgerEntry, 'hash'>, timestamp?: Date): string {
     const data = JSON.stringify({
       userId: entry.userId,
       action: entry.action,
@@ -11,7 +11,7 @@ class Ledger {
       status: entry.status,
       payload: this.redactSensitiveData(entry.payload),
       result: entry.result,
-      timestamp: new Date().toISOString()
+      timestamp: timestamp ? timestamp.toISOString() : new Date().toISOString()
     });
     
     return crypto.createHash('sha256').update(data).digest('hex');
@@ -56,6 +56,7 @@ class Ledger {
     result?: any
   ): Promise<LedgerEntry> {
     const redactedPayload = this.redactSensitiveData(payload);
+    const timestamp = new Date();
     
     const entryData: Omit<InsertLedgerEntry, 'hash'> = {
       userId,
@@ -66,14 +67,15 @@ class Ledger {
       result
     };
 
-    const hash = this.createHash(entryData);
+    const hash = this.createHash(entryData, timestamp);
 
     const ledgerEntry: InsertLedgerEntry = {
       ...entryData,
       hash
     };
 
-    return storage.createLedgerEntry(ledgerEntry);
+    const entry = await storage.createLedgerEntry(ledgerEntry, timestamp);
+    return entry;
   }
 
   async getLedger(userId: string, limit: number = 50): Promise<LedgerEntry[]> {
@@ -96,6 +98,8 @@ class Ledger {
   }
 
   async verifyEntryIntegrity(entry: LedgerEntry): Promise<boolean> {
+    if (!entry.timestamp) return false;
+    
     const computedHash = this.createHash({
       userId: entry.userId,
       action: entry.action,
@@ -103,7 +107,7 @@ class Ledger {
       status: entry.status,
       payload: entry.payload,
       result: entry.result
-    });
+    }, entry.timestamp);
 
     return computedHash === entry.hash;
   }

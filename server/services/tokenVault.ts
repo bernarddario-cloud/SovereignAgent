@@ -2,7 +2,23 @@ import { storage } from '../storage';
 import type { InsertToken, Token } from '@shared/schema';
 import crypto from 'crypto';
 
-const ENCRYPTION_KEY = process.env.TOKEN_ENCRYPTION_KEY || crypto.randomBytes(32).toString('hex');
+// Require a stable encryption key - use development key in dev mode, fail fast in production
+let ENCRYPTION_KEY = process.env.TOKEN_ENCRYPTION_KEY;
+
+if (!ENCRYPTION_KEY) {
+  if (process.env.NODE_ENV === 'development') {
+    // Use a stable development key (DO NOT USE IN PRODUCTION)
+    ENCRYPTION_KEY = 'a'.repeat(64);
+    console.warn('[TokenVault] Using development encryption key. Set TOKEN_ENCRYPTION_KEY for production.');
+  } else {
+    throw new Error('TOKEN_ENCRYPTION_KEY environment variable must be set and at least 64 characters (32 bytes hex)');
+  }
+}
+
+if (ENCRYPTION_KEY.length < 64) {
+  throw new Error('TOKEN_ENCRYPTION_KEY must be at least 64 characters (32 bytes hex)');
+}
+
 const ALGORITHM = 'aes-256-gcm';
 
 class TokenVault {

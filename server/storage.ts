@@ -57,7 +57,7 @@ export interface IStorage {
 
   // Ledger Entries
   getLedgerEntry(id: string): Promise<LedgerEntry | undefined>;
-  createLedgerEntry(entry: InsertLedgerEntry): Promise<LedgerEntry>;
+  createLedgerEntry(entry: InsertLedgerEntry, timestamp?: Date): Promise<LedgerEntry>;
   getLedgerEntriesByUserId(userId: string, limit?: number): Promise<LedgerEntry[]>;
 }
 
@@ -194,6 +194,9 @@ export class MemStorage implements IStorage {
       id,
       requestedAt: new Date(),
       respondedAt: null,
+      status: insertRequest.status || 'pending',
+      dryRun: insertRequest.dryRun ?? true,
+      dryRunResult: insertRequest.dryRunResult || null,
     };
     this.consentRequests.set(id, request);
     return request;
@@ -329,12 +332,12 @@ export class MemStorage implements IStorage {
     return this.ledgerEntries.get(id);
   }
 
-  async createLedgerEntry(insertEntry: InsertLedgerEntry): Promise<LedgerEntry> {
+  async createLedgerEntry(insertEntry: InsertLedgerEntry, timestamp?: Date): Promise<LedgerEntry> {
     const id = randomUUID();
     const entry: LedgerEntry = {
       ...insertEntry,
       id,
-      timestamp: new Date(),
+      timestamp: timestamp || new Date(),
     };
     this.ledgerEntries.set(id, entry);
     return entry;
