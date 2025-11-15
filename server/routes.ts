@@ -3,10 +3,14 @@ import { createServer, type Server } from "http";
 import { WebSocketServer, WebSocket } from "ws";
 import { storage } from "./storage";
 import { sovereignAgent } from "./services/agent";
+import { tokenVault } from "./services/tokenVault";
+import { ledger } from "./services/ledger";
 import { 
   agentRequestSchema, 
   consentResponseSchema,
-  insertActionSchema 
+  insertActionSchema,
+  consentPreviewSchema,
+  executeActionSchema
 } from "@shared/schema";
 import { z } from "zod";
 import multer from "multer";
@@ -322,6 +326,243 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
 
       res.json({ success: true });
+    } catch (error) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // OAuth Callback Endpoint
+  app.post('/api/auth/oauth/callback', async (req, res) => {
+    try {
+      const { provider, code, userId } = req.body;
+
+      if (!provider || !code || !userId) {
+        return res.status(400).json({ error: 'Missing required fields' });
+      }
+
+      await ledger.logAction(
+        userId,
+        'oauth.callback',
+        'api',
+        'confirmed',
+        { provider, code: '[REDACTED]' },
+        { success: true }
+      );
+
+      res.json({ success: true, provider });
+    } catch (error) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // Consent Preview (Dry Run)
+  app.post('/api/agent/consent', async (req, res) => {
+    try {
+      const { action, scope, parameters, dryRun } = consentPreviewSchema.parse(req.body);
+      const { sessionId } = req.body;
+
+      if (!sessionId) {
+        return res.status(400).json({ error: 'Session ID required' });
+      }
+
+      const session = await storage.getSession(sessionId);
+      if (!session) {
+        return res.status(404).json({ error: 'Session not found' });
+      }
+
+      const dryRunResult = {
+        action,
+        scope,
+        parameters,
+        estimatedImpact: 'Preview of operation',
+        reversible: true,
+        riskLevel: 'low'
+      };
+
+      const consentRequest = await storage.createConsentRequest({
+        sessionId,
+        action,
+        scope,
+        parameters,
+        dryRun,
+        dryRunResult,
+        status: 'pending'
+      });
+
+      await ledger.logAction(
+        session.userId,
+        `consent.request.${action}`,
+        'api',
+        'sent',
+        { scope, parameters, dryRun },
+        { consentRequestId: consentRequest.id }
+      );
+
+      broadcastToSession(sessionId, {
+        type: 'consent_required',
+        data: consentRequest
+      });
+
+      res.json(consentRequest);
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ error: error.errors });
+      }
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // Execute Action After Consent
+  app.post('/api/agent/execute', async (req, res) => {
+    try {
+      const { consentRequestId, confirm } = executeActionSchema.parse(req.body);
+
+      const consentRequest = await storage.getConsentRequest(consentRequestId);
+      if (!consentRequest) {
+        return res.status(404).json({ error: 'Consent request not found' });
+      }
+
+      const session = await storage.getSession(consentRequest.sessionId);
+      if (!session) {
+        return res.status(404).json({ error: 'Session not found' });
+      }
+
+      if (!confirm) {
+        await storage.updateConsentRequest(consentRequestId, { status: 'denied' });
+        await ledger.logAction(
+          session.userId,
+          `action.denied.${consentRequest.action}`,
+          'api',
+          'confirmed',
+          { consentRequestId },
+          { denied: true }
+        );
+        return res.json({ success: false, message: 'Action denied' });
+      }
+
+      await storage.updateConsentRequest(consentRequestId, { status: 'granted' });
+
+      const executionResult = {
+        success: true,
+        executedAt: new Date(),
+        action: consentRequest.action,
+        parameters: consentRequest.parameters
+      };
+
+      await ledger.logAction(
+        session.userId,
+        consentRequest.action,
+        'api',
+        'confirmed',
+        consentRequest.parameters,
+        executionResult
+      );
+
+      const updatedSession = await storage.updateSession(session.id, {
+        grantedScopes: [...(session.grantedScopes || []), consentRequest.scope]
+      });
+
+      broadcastToSession(session.id, {
+        type: 'action_executed',
+        data: executionResult
+      });
+
+      res.json(executionResult);
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ error: error.errors });
+      }
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // Get User Ledger
+  app.get('/api/ledger', async (req, res) => {
+    try {
+      const { userId, limit } = req.query;
+
+      if (!userId) {
+        return res.status(400).json({ error: 'User ID required' });
+      }
+
+      const entries = await ledger.getLedger(
+        userId as string,
+        limit ? parseInt(limit as string) : 50
+      );
+
+      res.json(entries);
+    } catch (error) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // Export Ledger
+  app.get('/api/ledger/export', async (req, res) => {
+    try {
+      const { userId, format } = req.query;
+
+      if (!userId) {
+        return res.status(400).json({ error: 'User ID required' });
+      }
+
+      const exportData = await ledger.exportLedger(
+        userId as string,
+        (format as 'json' | 'csv') || 'json'
+      );
+
+      if (format === 'csv') {
+        res.setHeader('Content-Type', 'text/csv');
+        res.setHeader('Content-Disposition', 'attachment; filename=ledger.csv');
+      } else {
+        res.setHeader('Content-Type', 'application/json');
+      }
+
+      res.send(exportData);
+    } catch (error) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // Get Connected Accounts (Token Status)
+  app.get('/api/auth/accounts', async (req, res) => {
+    try {
+      const { userId } = req.query;
+
+      if (!userId) {
+        return res.status(400).json({ error: 'User ID required' });
+      }
+
+      const accounts = await tokenVault.getAllUserTokens(userId as string);
+      res.json(accounts);
+    } catch (error) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // Revoke Token
+  app.delete('/api/auth/accounts/:provider', async (req, res) => {
+    try {
+      const { userId } = req.query;
+      const { provider } = req.params;
+
+      if (!userId) {
+        return res.status(400).json({ error: 'User ID required' });
+      }
+
+      const success = await tokenVault.revokeToken(userId as string, provider);
+
+      if (success) {
+        await ledger.logAction(
+          userId as string,
+          'token.revoke',
+          'api',
+          'confirmed',
+          { provider },
+          { success: true }
+        );
+      }
+
+      res.json({ success });
     } catch (error) {
       res.status(500).json({ error: error.message });
     }
