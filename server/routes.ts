@@ -55,6 +55,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   };
 
+
+    // Health check endpoint for Render
+  app.get('/health', (_req, res) => {
+    res.status(200).json({ status: 'healthy', timestamp: new Date().toISOString() });
+  });
+
   // Initialize session
   app.post('/api/sessions', async (req, res) => {
     try {
