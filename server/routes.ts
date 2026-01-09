@@ -14,6 +14,8 @@ import {
 } from "@shared/schema";
 import { z } from "zod";
 import multer from "multer";
+import parliamentRoutes from './routes/parliament';
+import ledgerRoutes from './routes/ledger';
 
 // Configure multer for audio uploads
 const upload = multer({
@@ -60,6 +62,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get('/health', (_req, res) => {
     res.status(200).json({ status: 'healthy', timestamp: new Date().toISOString() });
   });
+
+    // Mount parliament and ledger routes
+  app.use('/api/parliament', parliamentRoutes);
+  app.use('/api/ledger', ledgerRoutes);
 
   // Initialize session
   app.post('/api/sessions', async (req, res) => {
