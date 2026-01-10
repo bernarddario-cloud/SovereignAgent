@@ -1,5 +1,6 @@
 import type { Express } from "express";
 import { createServer, type Server } from "http";
+import crypto from "crypto";
 import { WebSocketServer, WebSocket } from "ws";
 import { storage } from "./storage";
 import { sovereignAgent } from "./services/agent";
@@ -67,6 +68,50 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.use('/api/parliament', parliamentRoutes);
   app.use('/api/ledger', ledgerRoutes);
 
+  // LAYER 2: Session management types and functions
+  type SessionRecord = {
+    id: string;
+    createdAt: string;
+    meta?: Record<string, unknown>;
+  };
+
+  // Minimal in-memory session registry (durability layer comes next)
+  const sessions = new Map<string, SessionRecord>();
+
+  async function createAgentSession(): Promise<string> {
+    const agentAny = sovereignAgent as any;
+
+    // Preferred: let the agent generate/own session IDs
+    if (typeof agentAny.createSession === "function") {
+      const created = await agentAny.createSession();
+      if (typeof created === "string" && created.length > 0) return created;
+      if (created?.id && typeof created.id === "string") return created.id;
+    }
+
+    // Secondary: initialize agent session with explicit ID
+    const id = crypto.randomUUID();
+    if (typeof agentAny.ensureSession === "function") await agentAny.ensureSession(id);
+    else if (typeof agentAny.initSession === "function") await agentAny.initSession(id);
+    else if (typeof agentAny.createSession === "function") await agentAny.createSession(id);
+
+    return id;
+  }
+
+  async function agentHasSession(id: string): Promise<boolean> {
+    const agentAny = sovereignAgent as any;
+    if (typeof agentAny.hasSession === "function") {
+      try {
+        return Boolean(await agentAny.hasSession(id));
+      } catch {
+        return false;
+      }
+    }
+
+    // Fallback: rely on our registry
+    return sessions.has(id);
+  }
+
+  
   // Initialize session
   app.post('/api/sessions', async (req, res) => {
     try {
