@@ -175,6 +175,40 @@ export async function registerRoutes(app: Express): Promise<Server> {
         data: result
       });
 
+      // --- n8n orchestration hook ---
+      try {
+        const actionName = "processVoiceInput";
+        if (shouldTriggerN8N(actionName)) {
+          const requestId = makeRequestId("action");
+          const event = {
+            eventType: "action.executed" as const,
+            requestId,
+            timestamp: new Date().toISOString(),
+            actionName,
+            sessionId: req.params.id,
+            actor: {
+              ip: req.ip,
+              userAgent: String(req.headers["user-agent"] || ""),
+            },
+            input: { audioFile: req.file?.originalname },
+            output: result,
+            meta: {
+              route: req.originalUrl,
+              method: req.method,
+            },
+          };
+          const webhookResult = await postToN8N(event);
+          if (!webhookResult.ok) {
+            console.warn("[n8n] webhook failed:", webhookResult);
+          } else {
+            console.log("[n8n] webhook ok:", { status: webhookResult.status, requestId });
+          }
+        }
+      } catch (err) {
+        console.warn("[n8n] webhook integration error:", err);
+      }
+      // --- end n8n hook ---
+
       res.json(result);
     } catch (error) {
       res.status(500).json({ error: error.message });
