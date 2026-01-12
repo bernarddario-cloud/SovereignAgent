@@ -43,6 +43,8 @@ const ALLOWED_ACTIONS: ReadonlySet<string> = new Set([
   "runTool",
   "orchestrate",
   "executePlan",
+    "processTextInput",
+    "processVoiceInput",
 ]);
 
 /**
