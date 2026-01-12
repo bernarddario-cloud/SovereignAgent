@@ -11,13 +11,13 @@ import {
   consentResponseSchema,
   insertActionSchema,
   consentPreviewSchema,
-  executeActionSchema
+  executeActionSchema,
+} from "@shared/schema";
 import {
   makeRequestId,
   postToN8N,
   shouldTriggerN8N,
 } from "./services/n8nWebhook";
-} from "@shared/schema";
 import { z } from "zod";
 import multer from "multer";
 import parliamentRoutes from './routes/parliament';
