@@ -38,9 +38,14 @@
 
 - **No fetched/sorted/paginated market sequence has an index-order assumption in this snapshot.**
 - `server/storage.ts:346-355` sorts ledger entries descending by timestamp (`352`) and then returns `entries.slice(0, limit)` (`355`). This is explicitly ordered, but is an audit ledger—not fetched market data.
-- `server/ledger/storage.ts:14-16` returns `ledger.slice(-limit)` from an in-memory ledger; no time ordering is established in this function. **UNCERTAIN:** this is a sequence truncation, not an assertion that `[0]`/`[-1]` is newest/oldest.
-- `server/services/ledger.ts:121-136` gets entries through the explicitly descending storage method and uses `entries.slice(0, 5)` at `135`; this is consistent with the storage ordering.
+- `server/services/ledger.ts:81-86,121-135` delegates ledger retrieval to that descending sort, caps export at 1,000 entries (`86`), and uses `entries.slice(0, 5)` for recent entries (`135`); the order is proven, but these are partial top-N results.
+- `server/ledger/storage.ts:10-16` appends records with `push` and returns `ledger.slice(-limit)`; no timestamp field or explicit sort exists. **UNCERTAIN:** it likely returns most-recent insertion order, but the record type at `server/ledger/storage.ts:1-6` does not prove time order.
+- `server/routes/ledger.ts:6-8` exposes that unsorted tail slice with a default `limit` of 10.
+- `client/src/components/ledger-viewer.tsx:13-20` requests `limit=5`; the canonical `/api/ledger` endpoint uses the explicitly sorted audit ledger, but this is still a top-five subset rather than a complete sequence.
+- `server/storage.ts:236-238,271-274` returns active opportunities and session actions by filtered `Map.values()` without sort. `client/src/components/financial-opportunities.tsx:108` maps opportunities in that returned order; `client/src/components/action-engine.tsx:171` displays the first three. **UNCERTAIN:** no semantic ordering is established.
+- `server/intelligence/server/intelligence/server/intelligence/server/intelligence/server/intelligence/minds/server/intelligence/minds/server/intelligence/minds/server/intelligence/minds/server/intelligence/minds/server/intelligence/server/middleware/server/middleware/server/ledger/server/ledger/storage.ts:26-30` parses the nested intent ledger in file append order; `server/intelligence/server/intelligence/server/intelligence/server/intelligence/server/intelligence/minds/server/intelligence/minds/server/intelligence/minds/server/intelligence/minds/server/intelligence/minds/server/intelligence/server/intelligence/intent.ts:28-31` filters it without reordering. This nested path is stale/unreachable.
 - `server/intelligence/server/intelligence/server/intelligence/server/intelligence/scoring.ts:22-23,32` indexes sorted vote-count/tie arrays. These are not fetched, sorted, or paginated external sequences.
+- `server/services/openai.ts:115,174` reads `response.choices[0]`; this follows a provider choice-array convention and is not a paginated market sequence.
 - `client/src/hooks/use-voice.tsx:43-46` uses `event.results[event.results.length - 1]` and `result[0]` on browser speech-recognition results. This is not provider OHLCV/quote data.
 - `client/src/components/action-engine.tsx:98` selects `parsedAction.actions[0]`; this is a user-entered action list, not a fetched or paginated sequence.
 
