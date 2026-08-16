@@ -18,9 +18,9 @@
 
 1. **Critical — the checked-out repository cannot substantiate an audit of the described live trading system.** Evidence: stale HEAD above; no tracked genome files; no market-data provider references in the repository-wide provider/fetch census in §2.1. Symptom: a reader could treat findings about this unrelated Node application as findings about SYNAPSE v3 while all requested price/genome controls are absent.
 2. **High (if this application is externally reachable) — a built-in account password appears in two live server paths.** `server/storage.ts:88-92` seeds `username` and `password`; `server/routes.ts:124-130` creates the same user when a session is created. Symptom: an attacker who can reach an authentication path using this seeded account could reuse a repository-visible credential. The repository does not contain a login route, so exploitability is **UNCERTAIN**.
-3. **High operational / capital-reporting risk — “execute” APIs report success without performing an external action.** `server/routes.ts:371-395` persists a requested action and then writes `status: 'success'` with the literal mock result at `381-385`; `server/routes.ts:334-355` does the same for an opportunity at `342-355`. Symptom: dashboards or downstream automations can show an investment/trade-like action as completed although this code made no provider/order call.
-4. **Medium — an audit export can silently download an HTTP error body as a ledger file.** `client/src/components/ledger-viewer.tsx:23-34` fetches the export and immediately calls `response.blob()` at line 26 without checking `response.ok`; it only logs a caught transport exception at line 33. Symptom: a failed audit export presents as a downloaded JSON/CSV file rather than a visible server-error failure.
-5. **Medium — duplicate, deeply misplaced live route code is present.** `server/routes/parliament.ts:1-45` is byte-identical to `server/intelligence/server/intelligence/server/intelligence/server/intelligence/server/intelligence/minds/server/intelligence/minds/server/intelligence/minds/server/intelligence/minds/server/intelligence/minds/server/intelligence/server/middleware/server/middleware/server/ledger/server/ledger/server/ledger/server/ledger/server/routes/parliament.ts:1-45`. Symptom: a future edit to only one copy can leave a stale behavior fossil; current startup imports only the normal path (`server/routes.ts:23,73`).
+3. **High operational / capital-reporting risk — consent and execution endpoints write false success without an executor.** `server/routes.ts:545-600` accepts consent, constructs `executionResult` with `success: true` at `575-580`, writes a `'confirmed'` ledger entry at `582-589`, and never calls an executor. `server/routes.ts:371-395` similarly writes `status: 'success'` with a mock result at `381-385`; `server/routes.ts:334-355` does the same for an opportunity. Symptom: the consent UI and audit ledger can report a financial/consent action as completed although this code made no provider/order call.
+4. **Medium — OAuth and orchestration can appear successful while their downstream effects fail or do not occur.** `server/routes.ts:465-482` records OAuth callback success but does not call `tokenVault.storeToken`; `server/routes.ts:178-210,232-264` logs an n8n delivery failure but still returns the successful primary result. Symptom: an account or automation can appear connected/executed while no usable token or downstream event exists.
+5. **Medium — reporting and observability hide failures.** `client/src/components/ledger-viewer.tsx:23-34` downloads an HTTP error body without checking `response.ok`; the majority of `server/routes.ts` handlers return 500 without server logging (enumerated in §2.6). Symptom: a failed audit export looks like a downloaded file, and an API incident lacks an application error record.
 
 ## 2. FULL CENSUS
 
@@ -96,6 +96,8 @@ Error-like return values that can be indistinguishable from a valid absence:
 - `server/services/tokenVault.ts:96` returns `null` for a missing token; `121-123` logs decryption failure and also returns `null`. A caller cannot distinguish a missing token from a corrupt/undecryptable token from the return value.
 - `server/services/tokenVault.ts:127-135` returns `null` both when no refresh token exists (`130-131`) and unconditionally after a token is present (`134`); the latter is an unimplemented refresh path, not an error-handled provider call.
 - `server/intelligence/server/intelligence/server/intelligence/server/intelligence/server/intelligence/minds/server/intelligence/minds/server/intelligence/minds/server/intelligence/minds/server/intelligence/minds/server/intelligence/server/middleware/server/middleware/server/ledger/server/ledger/storage.ts:26-30` returns `[]` when an intent-ledger file is absent. A missing ledger and a valid empty ledger are indistinguishable.
+- `server/services/openai.ts:174-175` returns `result.opportunities || []`; a model response missing the key is indistinguishable from a legitimate empty opportunity set.
+- `server/routes/intentRoutes.ts:6-30` returns a static mock `REJECT` result and `ledger: []`. **UNCERTAIN:** it is a mounted route only if separately registered; a caller may nevertheless treat its output as live intelligence.
 - `client/src/lib/queryClient.ts:36-38` intentionally returns `null` for a configured 401 policy; this is explicit behavior, not a silent transport failure.
 - `server/storage.ts:170-176,205-215,262-268` returns `undefined` for missing in-memory records; these are ordinary lookup/update outcomes and are **not classified as errors without a contract showing otherwise**.
 
@@ -110,8 +112,13 @@ Network/subprocess status handling:
 
 Reporting/logging priority:
 
-- `client/src/components/ledger-viewer.tsx:23-34` is the only verified reporting/export path without an HTTP status check.
-- `server/services/n8nWebhook.ts:107-115` logs non-OK and thrown webhook failures; it does not mute them.
+- `client/src/components/ledger-viewer.tsx:23-34` is the only verified reporting/export path without an HTTP status check; its catch only writes to the browser console (`32-34`), not a user-visible error.
+- `server/routes.ts:142-143,155-156,213-214,266-270,279-280,300-304,319-320,329-330,356-357,366-367,395-399,408-409,424-425,442-443,459-460,483-484,537-541,601-605,624-625,651-652,667-668,696-697` each return a 500 response with no server-side log. `server/routes/intentRoutes.ts:24-25` has the same pattern.
+- `server/index.ts:49-55` sends an error response and then throws, without logging first. **UNCERTAIN:** process-level behavior depends on the Node runtime's unhandled-error policy.
+- `server/routes.ts:67-70` reports the health endpoint as healthy unconditionally; it does not check OpenAI, n8n, token storage, or persistence dependencies.
+- `server/routes.ts:178-210,232-264` make n8n delivery non-fatal: failure is only `console.warn`, the user receives the successful primary result, and no n8n failure is recorded by `server/services/ledger.ts:50-79`.
+- `server/services/n8nWebhook.ts:88-97,107-115` returns the same `{ ok: false }` shape for a missing URL, an unallowlisted action, HTTP failure, and network failure; logs distinguish them, but callers cannot.
+- `server/middleware/jsonAuditLogger.ts:6-13` records method/path/status/duration but not the request ID created by `server/middleware/requestId.ts:5-8`; `server/index.ts:25-37` also truncates its API log line at 80 characters. This impairs tracing of a reported failure through the n8n event.
 
 ### 2.7 DUPLICATION MAP
 
