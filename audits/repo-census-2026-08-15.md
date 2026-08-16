@@ -50,13 +50,14 @@ Real-looking hardcoded credential findings (value intentionally omitted):
 
 - `server/storage.ts:90` — `password`
 - `server/routes.ts:128` — `password`
+- `replit.md:219` — documented `username` / `password` pair
 
 Non-findings/limits:
 
 - `server/services/openai.ts:4` — `OPENAI_API_KEY` has a placeholder fallback, not a real-looking secret.
 - `server/services/tokenVault.ts:6-14` — `TOKEN_ENCRYPTION_KEY` is environment-only; its development fallback is generated from a repeated character and is not reported as a real credential.
 - No commented-out credential or token was found in tracked source.
-- No secret-shaped string was found in tracked `.md`, `.json`, or configuration files. `CURRENT_STATE.md:1-43` contains no credential; `components.json:1-22` contains a public schema URL.
+- `replit.md:219` is the only tracked Markdown secret-shaped credential reference found. `CURRENT_STATE.md:1-43` contains no credential; `components.json:1-22` contains a public schema URL.
 
 ### 2.4 DEAD ENDPOINTS AND RETIRED SERVICES
 
@@ -74,6 +75,7 @@ Live external calls:
 
 - `server/services/n8nWebhook.ts:35,85-116` reads `N8N_WEBHOOK_URL` and posts an event at `101-105`; its result status is checked at `107-112`.
 - `server/routes.ts:178-210` calls that webhook after voice input; `server/routes.ts:232-264` calls it after text input. These can send messages/events if the environment variable is configured. They are **not evidence of Manus or any other named retired service**.
+- `server/routes.ts:183-199,237-253` construct those events. The text path includes the message (`247`) and result (`248`); the voice path includes the audio filename (`193`) and result (`194`). Conditional message/privacy impact is therefore verified, but the configured endpoint and whether it is retired are **not determinable** from the repository.
 - Money-costing retired call: **none verified**.
 - Message-sending retired call: **none verified**.
 
